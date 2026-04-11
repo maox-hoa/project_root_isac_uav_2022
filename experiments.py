@@ -9,44 +9,49 @@ from models import get_all_hover_indices
 from crb_functions import crb as compute_crb
 from rate_functions import avg_data_rate
 from multi_stage import multi_stage
+from multiprocessing import Pool, cpu_count
+def run_single_mc(args):
+    mc, setup_base, params_override = args
+    np.random.seed(42 + mc)
+    setup = {
+        'base_station_pos': setup_base['base_station_pos'],
+        'comm_user_pos': setup_base['comm_user_pos'][:, mc],
+        'sense_target_pos': setup_base['sense_target_pos'][:, mc],
+        'est_sense_target': setup_base['est_sense_target'][:, mc],
+        'total_energy': setup_base['total_energy'],
+    }
+
+    try:
+        res = multi_stage(setup, params_override, verbose=False)
+        return res['final_crb'], res['final_rate'], res['final_mse']
+    except Exception as e:
+        print(f"MC {mc+1} failed: {e}")
+        return np.nan, np.nan, np.nan
 
 
 def monte_carlo(n_mc, setup_base, params_override=None, verbose=False):
-    """
-    Run Monte Carlo simulations with random CU/ST positions.
-    setup_base: dict with 'comm_user_pos', 'sense_target_pos', 'est_sense_target'
-                each (2, n_mc) arrays, plus scalar 'total_energy', 'base_station_pos'
-    Returns: dict with CRB_avg, Rate_avg, MSE_avg arrays
-    """
     CRB_mc = np.zeros(n_mc)
     Rate_mc = np.zeros(n_mc)
     MSE_mc = np.zeros(n_mc)
 
-    for mc in range(n_mc):
-        if verbose or mc % 5 == 0:
-            print(f"  MC {mc+1}/{n_mc}")
+    n_cores = 1
+    print(f"Using {n_cores} CPU cores...")
 
-        setup = {
-            'base_station_pos': setup_base['base_station_pos'],
-            'comm_user_pos': setup_base['comm_user_pos'][:, mc],
-            'sense_target_pos': setup_base['sense_target_pos'][:, mc],
-            'est_sense_target': setup_base['est_sense_target'][:, mc],
-            'total_energy': setup_base['total_energy'],
-        }
+    args_list = [(mc, setup_base, params_override) for mc in range(n_mc)]
 
-        try:
-            res = multi_stage(setup, params_override, verbose=False)
-            CRB_mc[mc] = res['final_crb']
-            Rate_mc[mc] = res['final_rate']
-            MSE_mc[mc] = res['final_mse']
-        except Exception as e:
-            print(f"  MC {mc+1} failed: {e}")
-            CRB_mc[mc] = np.nan
-            Rate_mc[mc] = np.nan
-            MSE_mc[mc] = np.nan
+    with Pool(processes=n_cores) as pool:
+        results = pool.map(run_single_mc, args_list)
 
-    return {'CRB_avg': CRB_mc, 'Rate_avg': Rate_mc, 'MSE_avg': MSE_mc}
+    for i, (crb_val, rate_val, mse_val) in enumerate(results):
+        CRB_mc[i] = crb_val
+        Rate_mc[i] = rate_val
+        MSE_mc[i] = mse_val
 
+    return {
+        'CRB_avg': CRB_mc,
+        'Rate_avg': Rate_mc,
+        'MSE_avg': MSE_mc
+    }
 
 def generate_random_positions(n_mc, seed=None):
     """Generate random CU, ST, and initial estimate positions."""

@@ -164,18 +164,22 @@ def optimize_m(E_m, s_c, S_hover_all, S_total, s_target_est, s_start):
         # ---- Solve ----
         prob = cp.Problem(objective, constraints)
         try:
-            prob.solve(solver=cp.CLARABEL, verbose=False)
-        except (cp.SolverError, Exception):
-            try:
-                prob.solve(solver=cp.SCS, verbose=False, max_iters=10000,
-                           eps=1e-6)
-            except cp.SolverError:
-                pass
+            prob.solve(
+                solver=cp.SCS,
+                verbose=False,
+                max_iters=30000,
+                eps=1e-7,
+                acceleration_lookback=20,
+                scale=1.0
+            )
+        except Exception as e:
+            print(f"SCS solver failed: {e}")
 
         # ---- Handle solution ----
         solved = (prob.status in ['optimal', 'optimal_inaccurate']
                   and S_var.value is not None
-                  and not np.any(np.isnan(S_var.value)))
+                  and not np.any(np.isnan(S_var.value))
+                  and not np.any(np.isinf(S_var.value)))
 
         if not solved:
             # Invalid solution: use last valid, adjust S_init
