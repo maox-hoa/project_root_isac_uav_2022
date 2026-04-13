@@ -67,7 +67,7 @@ def propulsion_power(V_norm):
     inner = np.sqrt(1 + V_norm**4 / (4 * v_0**4)) - V_norm**2 / (2 * v_0**2)
     term2 = P_I * np.sqrt(np.maximum(inner, 0))
     # Note: MATLAB calc_real_energy.m uses V^2 here, not V^3 as in the paper
-    term3 = 0.5 * D_0 * rho * s_rotor * A_rotor * V_norm**3
+    term3 = 0.5 * D_0 * rho * s_rotor * A_rotor * V_norm**2
     return term1 + term2 + term3
 
 

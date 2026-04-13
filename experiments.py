@@ -1,158 +1,71 @@
-"""
-Monte Carlo experiments: energy variation, eta variation.
-Translates: monte_carlo.m, var_energy.m, var_eta.m, var_iter.m
-"""
+"""Monte Carlo experiments."""
 import numpy as np
 import matplotlib.pyplot as plt
-from parameters import *
-from models import get_all_hover_indices
-from crb_functions import crb as compute_crb
-from rate_functions import avg_data_rate
+import parameters as PM
 from multi_stage import multi_stage
-from multiprocessing import Pool, cpu_count
-def run_single_mc(args):
-    mc, setup_base, params_override = args
-    np.random.seed(42 + mc)
-    setup = {
-        'base_station_pos': setup_base['base_station_pos'],
-        'comm_user_pos': setup_base['comm_user_pos'][:, mc],
-        'sense_target_pos': setup_base['sense_target_pos'][:, mc],
-        'est_sense_target': setup_base['est_sense_target'][:, mc],
-        'total_energy': setup_base['total_energy'],
-    }
 
+
+def mc_single(setup, eta_val=None, n_iter_val=None):
     try:
-        res = multi_stage(setup, params_override, verbose=False)
+        res = multi_stage(setup, eta_val=eta_val, n_iter_val=n_iter_val, verbose=False)
         return res['final_crb'], res['final_rate'], res['final_mse']
-    except Exception as e:
-        print(f"MC {mc+1} failed: {e}")
+    except Exception:
         return np.nan, np.nan, np.nan
 
 
-def monte_carlo(n_mc, setup_base, params_override=None, verbose=False):
-    CRB_mc = np.zeros(n_mc)
-    Rate_mc = np.zeros(n_mc)
-    MSE_mc = np.zeros(n_mc)
-
-    n_cores = 10
-    print(f"Using {n_cores} CPU cores...")
-
-    args_list = [(mc, setup_base, params_override) for mc in range(n_mc)]
-
-    with Pool(processes=n_cores) as pool:
-        results = pool.map(run_single_mc, args_list)
-
-    for i, (crb_val, rate_val, mse_val) in enumerate(results):
-        CRB_mc[i] = crb_val
-        Rate_mc[i] = rate_val
-        MSE_mc[i] = mse_val
-
-    return {
-        'CRB_avg': CRB_mc,
-        'Rate_avg': Rate_mc,
-        'MSE_avg': MSE_mc
-    }
-
-def generate_random_positions(n_mc, seed=None):
-    """Generate random CU, ST, and initial estimate positions."""
-    if seed is not None:
-        np.random.seed(seed)
-    return {
-        'base_station_pos': base_station_pos,
-        'comm_user_pos': np.array([L_x * np.random.rand(n_mc),
-                                    L_y * np.random.rand(n_mc)]),
-        'sense_target_pos': np.array([L_x * np.random.rand(n_mc),
-                                       L_y * np.random.rand(n_mc)]),
-        'est_sense_target': np.array([L_x * np.random.rand(n_mc),
-                                       L_y * np.random.rand(n_mc)]),
-        'total_energy': total_energy,
-    }
+def gen_setups(n_mc, seed=42):
+    rng = np.random.RandomState(seed)
+    return [{
+        'base_station_pos': PM.base_station_pos.copy(),
+        'comm_user_pos': rng.rand(2) * np.array([PM.L_x, PM.L_y]),
+        'sense_target_pos': rng.rand(2) * np.array([PM.L_x, PM.L_y]),
+        'est_sense_target': rng.rand(2) * np.array([PM.L_x, PM.L_y]),
+        'total_energy': PM.total_energy,
+    } for _ in range(n_mc)]
 
 
-def var_energy(n_mc=10, energy_vec=None, save_path=None):
-    """
-    Experiment: vary total energy, run MC simulations.
-    Translates var_energy.m.
-    """
+def var_energy(n_mc=5, energy_vec=None, save_path=None):
     if energy_vec is None:
         energy_vec = np.arange(10e3, 36e3, 5e3)
-
-    setup_base = generate_random_positions(n_mc, seed=42)
-
-    CRB_over_energy = np.zeros(len(energy_vec))
-    MSE_over_energy = np.zeros(len(energy_vec))
-    Rate_over_energy = np.zeros(len(energy_vec))
-
-    for i, E_tot in enumerate(energy_vec):
-        print(f"\nEnergy = {E_tot/1e3:.0f} KJ ({i+1}/{len(energy_vec)})")
-        setup_base['total_energy'] = E_tot
-        res_mc = monte_carlo(n_mc, setup_base)
-        CRB_over_energy[i] = np.nanmean(res_mc['CRB_avg'])
-        MSE_over_energy[i] = np.nanmean(res_mc['MSE_avg'])
-        Rate_over_energy[i] = np.nanmean(res_mc['Rate_avg'])
-
-    # Plot
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-
-    ax1.semilogy(energy_vec / 1e3, CRB_over_energy, 'bo-', label='CRB')
-    ax1.semilogy(energy_vec / 1e3, MSE_over_energy, 'rs-', label='MSE')
-    ax1.set_xlabel('Energy [KJ]')
-    ax1.set_ylabel('Estimation Error [m²]')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    ax1.set_title('CRB & MSE vs Energy')
-
-    ax2.plot(energy_vec / 1e3, Rate_over_energy / 1e6, 'go-')
-    ax2.set_xlabel('Energy [KJ]')
-    ax2.set_ylabel('Avg. Rate [Mbits/s]')
-    ax2.grid(True, alpha=0.3)
-    ax2.set_title('Rate vs Energy')
-
+    setups = gen_setups(n_mc)
+    CRB_avg, MSE_avg, Rate_avg = [np.zeros(len(energy_vec)) for _ in range(3)]
+    for i, E in enumerate(energy_vec):
+        print(f"E={E/1e3:.0f}KJ ({i+1}/{len(energy_vec)})")
+        cs, rs, ms = [], [], []
+        for s in setups:
+            s['total_energy'] = E
+            c, r, m = mc_single(s)
+            cs.append(c); rs.append(r); ms.append(m)
+        CRB_avg[i] = np.nanmean(cs); MSE_avg[i] = np.nanmean(ms); Rate_avg[i] = np.nanmean(rs)
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 5))
+    a1.semilogy(energy_vec/1e3, CRB_avg, 'bo-', label='CRB')
+    a1.semilogy(energy_vec/1e3, MSE_avg, 'rs-', label='MSE')
+    a1.set_xlabel('$E_{tot}$ [KJ]'); a1.set_ylabel('Error [m²]'); a1.legend(); a1.grid(True, alpha=.3)
+    a2.plot(energy_vec/1e3, Rate_avg/1e6, 'go-')
+    a2.set_xlabel('$E_{tot}$ [KJ]'); a2.set_ylabel('Rate [Mbit/s]'); a2.grid(True, alpha=.3)
     plt.tight_layout()
-    if save_path:
-        plt.savefig(save_path, dpi=150)
-    return fig, energy_vec, CRB_over_energy, MSE_over_energy, Rate_over_energy
+    if save_path: plt.savefig(save_path, dpi=150)
+    return fig
 
 
-def var_eta(n_mc=10, eta_vec=None, save_path=None):
-    """
-    Experiment: vary eta, run MC simulations.
-    Translates var_eta.m.
-    """
+def var_eta(n_mc=5, eta_vec=None, save_path=None):
     if eta_vec is None:
-        eta_vec = np.array([1.0, 0.8, 0.6, 0.4, 0.2, 0.0])
-
-    setup_base = generate_random_positions(n_mc, seed=42)
-
-    CRB_over_eta = np.zeros(len(eta_vec))
-    MSE_over_eta = np.zeros(len(eta_vec))
-    Rate_over_eta = np.zeros(len(eta_vec))
-
-    for i, cur_eta in enumerate(eta_vec):
-        print(f"\neta = {cur_eta:.1f} ({i+1}/{len(eta_vec)})")
-        res_mc = monte_carlo(n_mc, setup_base, params_override={'eta': cur_eta})
-        CRB_over_eta[i] = np.nanmean(res_mc['CRB_avg'])
-        MSE_over_eta[i] = np.nanmean(res_mc['MSE_avg'])
-        Rate_over_eta[i] = np.nanmean(res_mc['Rate_avg'])
-
-    # Plot tradeoff
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-
-    ax1.semilogy(eta_vec, CRB_over_eta, 'bo-', label='CRB')
-    ax1.semilogy(eta_vec, MSE_over_eta, 'rs-', label='MSE')
-    ax1.set_xlabel('η')
-    ax1.set_ylabel('Estimation Error [m²]')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    ax1.set_title('CRB & MSE vs η')
-
-    ax2.plot(eta_vec, Rate_over_eta / 1e6, 'go-')
-    ax2.set_xlabel('η')
-    ax2.set_ylabel('Avg. Rate [Mbits/s]')
-    ax2.grid(True, alpha=0.3)
-    ax2.set_title('Rate vs η')
-
+        eta_vec = np.array([1.0, 0.75, 0.5, 0.25, 0.0])
+    setups = gen_setups(n_mc)
+    CRB_avg, MSE_avg, Rate_avg = [np.zeros(len(eta_vec)) for _ in range(3)]
+    for i, et in enumerate(eta_vec):
+        print(f"η={et:.2f} ({i+1}/{len(eta_vec)})")
+        cs, rs, ms = [], [], []
+        for s in setups:
+            c, r, m = mc_single(s, eta_val=et)
+            cs.append(c); rs.append(r); ms.append(m)
+        CRB_avg[i] = np.nanmean(cs); MSE_avg[i] = np.nanmean(ms); Rate_avg[i] = np.nanmean(rs)
+    fig, ax = plt.subplots(figsize=(7, 5))
+    ax.semilogy(Rate_avg/1e6, CRB_avg, 'bo-', ms=8, label='CRB')
+    ax.semilogy(Rate_avg/1e6, MSE_avg, 'rs-', ms=8, label='MSE')
+    for i, et in enumerate(eta_vec):
+        ax.annotate(f'η={et}', (Rate_avg[i]/1e6, MSE_avg[i]), textcoords="offset points", xytext=(8,5), fontsize=9)
+    ax.set_xlabel('Rate [Mbit/s]'); ax.set_ylabel('Error [m²]'); ax.legend(); ax.grid(True, alpha=.3)
     plt.tight_layout()
-    if save_path:
-        plt.savefig(save_path, dpi=150)
-    return fig, eta_vec, CRB_over_eta, MSE_over_eta, Rate_over_eta
+    if save_path: plt.savefig(save_path, dpi=150)
+    return fig

@@ -1,56 +1,28 @@
-"""
-Main entry point for ISAC-UAV simulation.
-Translates multi_stage_script.m.
-"""
-import numpy as np
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import sys
-import os
-
+"""Main entry point."""
+import numpy as np, time, warnings, os, sys
+warnings.filterwarnings('ignore')
+import matplotlib; matplotlib.use('Agg')
 sys.path.insert(0, os.path.dirname(__file__))
 
-from parameters import *
+import parameters as PM
 from multi_stage import multi_stage
 from plotting import plot_map, plot_convergence
 
-FIGURES_DIR = os.path.join(os.path.dirname(__file__), 'figures')
-os.makedirs(FIGURES_DIR, exist_ok=True)
-
-
-def run_default():
-    """Run with default parameters (matches multi_stage_script.m)."""
-    np.random.seed(0)
-
-    setup = {
-        'base_station_pos': base_station_pos,
-        'comm_user_pos': comm_user_pos,
-        'sense_target_pos': sense_target_pos,
-        'est_sense_target': est_sense_target,
-        'total_energy': total_energy,
-    }
-
-    print("="*60)
-    print("ISAC-UAV Simulation (arXiv version)")
-    print(f"  eta={eta}, N_stg={N_stg}, mu={mu}, E_tot={total_energy/1e3:.0f}KJ")
-    print(f"  Base: {base_station_pos}, CU: {comm_user_pos}")
-    print(f"  ST: {sense_target_pos}, ST_est: {est_sense_target}")
-    print("="*60)
-
-    res = multi_stage(setup, verbose=True)
-
-    # Plot trajectory map
-    fig1, _ = plot_map(res, setup,
-                       save_path=os.path.join(FIGURES_DIR, 'trajectory_map.png'))
-
-    # Plot convergence
-    fig2, _ = plot_convergence(res['J_history_stages'],
-                               save_path=os.path.join(FIGURES_DIR, 'convergence.png'))
-
-    print(f"\nFigures saved to {FIGURES_DIR}")
-    return res
-
+FIGS = os.path.join(os.path.dirname(__file__), 'figures')
+os.makedirs(FIGS, exist_ok=True)
 
 if __name__ == '__main__':
-    run_default()
+    np.random.seed(0)
+    t0 = time.time()
+    setup = {
+        'base_station_pos': PM.base_station_pos.copy(),
+        'comm_user_pos': PM.comm_user_pos.copy(),
+        'sense_target_pos': PM.sense_target_pos.copy(),
+        'est_sense_target': PM.est_sense_target.copy(),
+        'total_energy': PM.total_energy,
+    }
+    print(f"ISAC-UAV: η={PM.eta}, N_stg={PM.N_stg}, E={PM.total_energy/1e3:.0f}KJ")
+    res = multi_stage(setup, verbose=True)
+    plot_map(res, setup, save_path=os.path.join(FIGS, 'trajectory_map.png'))
+    plot_convergence(res['J_history_stages'], save_path=os.path.join(FIGS, 'convergence.png'))
+    print(f"Done in {time.time()-t0:.0f}s → {FIGS}")

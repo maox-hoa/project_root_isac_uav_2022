@@ -1,246 +1,178 @@
 """
 Trajectory optimization at stage m using CVXPY.
-Translates optimize_m.m from MATLAB/CVX to Python/CVXPY.
+Accepts variable N_stg/K_stg for ending stage support.
 """
 import numpy as np
 import cvxpy as cp
-from parameters import *
 from models import get_hover_indices
 from crb_functions import crb_grad as compute_crb_grad
 from rate_functions import rate_grad as compute_rate_grad
+import parameters as P
 
 
-def calc_constraint_energy_cvx(V_var, delta_var, N):
-    """
-    Build CVXPY expression for the energy constraint (eq. 44).
-    V_var: cp.Variable(2, N)
-    delta_var: cp.Variable(N)
-    Returns: CVXPY expression (convex)
-    """
-    K = N // mu
-
-    # sum of ||v_i||^2 = total sum of squares
+def _build_energy_cvx(V_var, delta_var, N, K):
+    """Energy constraint expression (eq. 44)."""
     sum_v_sq = cp.sum_squares(V_var)
+    sum_v_cube = 0
+    for i in range(N):
+        sum_v_cube += cp.power(cp.norm(V_var[:, i], 2), 3)
 
-    # sum of ||v_i||^3
-    v_cube_terms = [cp.power(cp.norm(V_var[:, i], 2), 3) for i in range(N)]
-    sum_v_cube = sum(v_cube_terms)
-
-    power_sum1 = P_0 * (N + 3.0 / U_tip**2 * sum_v_sq)
-    power_sum1 += 0.5 * D_0 * rho * s_rotor * A_rotor * sum_v_cube
-    power_sum2 = P_I * cp.sum(delta_var)
-    power_sum3 = K * (P_0 + P_I)
-
-    E_const = T_f * (power_sum1 + power_sum2) + T_h * power_sum3
-    return E_const
+    ps1 = P.P_0 * (N + 3.0 / P.U_tip**2 * sum_v_sq)
+    ps1 += 0.5 * P.D_0 * P.rho * P.s_rotor * P.A_rotor * sum_v_cube
+    ps2 = P.P_I * cp.sum(delta_var)
+    ps3 = K * (P.P_0 + P.P_I)
+    return P.T_f * (ps1 + ps2) + P.T_h * ps3
 
 
-def optimize_m(E_m, s_c, S_hover_all, S_total, s_target_est, s_start):
+def _try_solve(prob):
+    """Try solvers in preference order."""
+    for solver, kw in [
+        (cp.ECOS, {'verbose': False, 'max_iters': 500}),
+        (cp.CLARABEL, {'verbose': False}),
+        (cp.SCS, {'verbose': False, 'max_iters': 50000, 'eps': 1e-9}),
+    ]:
+        try:
+            prob.solve(solver=solver, **kw)
+            if prob.status in ('optimal', 'optimal_inaccurate'):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def optimize_m(E_m, s_c, S_hover_all, S_total, s_target_est, s_start,
+               N_stg_m=None, K_stg_m=None, eta_val=None, n_iter_val=None):
     """
-    Optimize trajectory for stage m (Algorithm 1 core loop).
-    Translates optimize_m.m.
+    Optimize trajectory for stage m.
 
-    Parameters:
-        E_m:            Available energy [J]
-        s_c:            (2,) communication user position
-        S_hover_all:    (2, K_total) all hover points (prev stages + current init)
-        S_total:        (2, N_total) all trajectory points (prev + current init)
-        s_target_est:   (2,) estimated target position
-        s_start:        (2,) start position of this stage
-
-    Returns:
-        S_opt:      (2, N_stg) optimized trajectory
-        V_opt:      (2, N_stg) optimized velocities
-        CRB_opt:    scalar CRB Taylor value
-        R_opt:      scalar Rate Taylor value
-        J_history:  (n_iter,) objective values per iteration
-        CRB_history: (n_iter,) CRB values per iteration
-        R_history:  (n_iter,) Rate values per iteration
+    N_stg_m, K_stg_m: waypoints/hovers for THIS stage (can differ from default
+                       for ending stage). If None, uses P.N_stg, P.K_stg.
     """
-    hover_idx = get_hover_indices(N_stg)  # 0-indexed hover indices within stage
+    N_m = N_stg_m if N_stg_m is not None else P.N_stg
+    K_m = K_stg_m if K_stg_m is not None else P.K_stg
+    eta = eta_val if eta_val is not None else P.eta
+    nit = n_iter_val if n_iter_val is not None else P.n_iter
+    hover_idx = get_hover_indices(N_m)  # indices within this stage
 
     # ---- Initial values ----
-    S_init = S_total[:, -N_stg:].copy()
+    S_init = S_total[:, -N_m:].copy()
+    V_init = np.zeros((2, N_m))
+    V_init[:, 0] = (S_init[:, 0] - s_start) / P.T_f
+    V_init[:, 1:] = np.diff(S_init, axis=1) / P.T_f
 
-    # Initial velocity from S_init
-    V_init = np.zeros((2, N_stg))
-    V_init[:, 0] = (S_init[:, 0] - s_start) / T_f
-    V_init[:, 1:] = np.diff(S_init, axis=1) / T_f
+    V_norms = np.linalg.norm(V_init, axis=0)
+    dsq = np.sqrt(1 + V_norms**4 / (4 * P.v_0**4)) - V_norms**2 / (2 * P.v_0**2)
+    dsq = np.maximum(dsq, 1e-10)
 
-    # delta_square_init (eq. 41 evaluated at V_init)
-    V_init_norms = np.linalg.norm(V_init, axis=0)
-    delta_sq_init = (np.sqrt(1 + V_init_norms**4 / (4 * v_0**4))
-                     - V_init_norms**2 / (2 * v_0**2))
-    delta_sq_init = np.maximum(delta_sq_init, 1e-10)
-
-    # Valid solution buffers
     S_init_valid = S_init.copy()
     S_valid = S_init * 1.1
     V_valid = V_init.copy()
-    delta_valid = np.sqrt(delta_sq_init)
-    xi_valid = delta_sq_init.copy()
-    R_opt_valid = 0.0
-    CRB_opt_valid = 0.0
-    best_val = 1e13
-    N_nan = 0
+    R_best = 0.0; CRB_best = 0.0; best_val = 1e13; N_nan = 0
 
-    J_history = np.full(n_iter, np.nan)
-    CRB_history = np.full(n_iter, np.nan)
-    R_history = np.full(n_iter, np.nan)
+    J_hist = np.full(nit, np.nan)
+    CRB_hist = np.full(nit, np.nan)
+    R_hist = np.full(nit, np.nan)
 
-    for u in range(n_iter):
-        # ---- Update hover and total trajectory with current S_init ----
-        S_hover_all[:, -K_stg:] = S_init[:, hover_idx]
-        S_total[:, -N_stg:] = S_init
+    for u in range(nit):
+        # Update current stage in global arrays
+        S_hover_all[:, -K_m:] = S_init[:, hover_idx]
+        S_total[:, -N_m:] = S_init
 
-        # ---- Compute gradients at S_init ----
-        crb_gx, crb_gy = compute_crb_grad(S_hover_all, s_target_est, K_stg)
-        N_total = S_total.shape[1]
-        rate_gx, rate_gy = compute_rate_grad(S_init, s_c, N_total)
+        # Gradients: CRB over ALL hovers, Rate over current stage's N_m pts
+        crb_gx, crb_gy = compute_crb_grad(S_hover_all, s_target_est, K_m)
+        N_tot = S_total.shape[1]
+        rate_gx, rate_gy = compute_rate_grad(S_init, s_c, N_tot)
 
-        # ---- CVXPY Problem ----
-        S_var = cp.Variable((2, N_stg))
-        V_var = cp.Variable((2, N_stg))
-        delta_var = cp.Variable(N_stg)
-        xi_var = cp.Variable(N_stg)
+        # ---- CVX block ----
+        S = cp.Variable((2, N_m))
+        V = cp.Variable((2, N_m))
+        delta = cp.Variable(N_m, nonneg=True)
+        xi = cp.Variable(N_m, nonneg=True)
 
-        # Taylor expansion of CRB (linear in hover points of S_var)
-        crb_taylor = 0
-        for j in range(K_stg):
-            hi = hover_idx[j]
-            crb_taylor += crb_gx[j] * (S_var[0, hi] - S_init[0, hi])
-            crb_taylor += crb_gy[j] * (S_var[1, hi] - S_init[1, hi])
+        CRB_taylor = (crb_gx @ (S[0, hover_idx] - S_init[0, hover_idx])
+                      + crb_gy @ (S[1, hover_idx] - S_init[1, hover_idx]))
+        R_taylor = (rate_gx @ (S[0, :] - S_init[0, :])
+                    + rate_gy @ (S[1, :] - S_init[1, :]))
 
-        # Taylor expansion of Rate (linear in all waypoints of S_var)
-        rate_taylor = 0
-        for n in range(N_stg):
-            rate_taylor += rate_gx[n] * (S_var[0, n] - S_init[0, n])
-            rate_taylor += rate_gy[n] * (S_var[1, n] - S_init[1, n])
+        obj = cp.Minimize(eta * CRB_taylor - (1 - eta) * R_taylor / P.B)
 
-        # Objective: minimize eta*CRB_taylor - (1-eta)*R_taylor/B
-        objective = cp.Minimize(eta * crb_taylor - (1 - eta) * rate_taylor / B)
+        cons = [E_m >= _build_energy_cvx(V, delta, N_m, K_m)]
+        cons.append((S[:, 0] - s_start) / P.T_f == V[:, 0])
+        if N_m > 1:
+            cons.append((S[:, 1:] - S[:, :-1]) / P.T_f == V[:, 1:])
+        for i in range(N_m):
+            cons.append(cp.norm(V[:, i], 2) <= P.V_max)
+        cons += [S[0, :] >= 0, S[1, :] >= 0, S[0, :] <= P.L_x, S[1, :] <= P.L_y]
 
-        # ---- Constraints ----
-        constraints = []
+        for i in range(N_m):
+            vi = V_init[:, i]
+            vi_sq = float(np.sum(vi**2))
+            lhs_a = vi_sq / P.v_0**2 + (2.0 / P.v_0**2) * vi @ (V[:, i] - vi)
+            cons.append(lhs_a >= cp.power(cp.inv_pos(delta[i]), 2) - xi[i])
+            sq_d = float(np.sqrt(dsq[i]))
+            cons.append(dsq[i] + 2.0 * sq_d * (delta[i] - sq_d) >= xi[i])
 
-        # Energy constraint
-        E_expr = calc_constraint_energy_cvx(V_var, delta_var, N_stg)
-        constraints.append(E_m >= E_expr)
+        prob = cp.Problem(obj, cons)
+        solved = _try_solve(prob)
 
-        # Velocity definition
-        constraints.append((S_var[:, 0] - s_start) / T_f == V_var[:, 0])
-        if N_stg > 1:
-            constraints.append((S_var[:, 1:] - S_var[:, :-1]) / T_f == V_var[:, 1:])
-
-        # Speed limit
-        for i in range(N_stg):
-            constraints.append(cp.norm(V_var[:, i], 2) <= V_max)
-
-        # Non-negativity
-        constraints.append(delta_var >= 0)
-        constraints.append(xi_var >= 0)
-
-        # Boundary constraints
-        constraints.append(S_var[0, :] >= 0)
-        constraints.append(S_var[1, :] >= 0)
-        constraints.append(S_var[0, :] <= L_x)
-        constraints.append(S_var[1, :] <= L_y)
-
-        # SCA constraints (51a) and (51b)
-        for i in range(N_stg):
-            v_init_i = V_init[:, i]
-            v_init_norm = np.linalg.norm(v_init_i)
-
-            # (51a): linear_lower_bound(||v||^2/v0^2) >= 1/delta^2 - xi
-            lhs_51a = ((v_init_norm / v_0)**2
-                       + (2 / v_0**2) * v_init_i @ (V_var[:, i] - v_init_i))
-            constraints.append(lhs_51a >= cp.square(cp.inv_pos(delta_var[i])) - xi_var[i])
-
-            # (51b): linear_lower_bound(delta^2) >= xi
-            sqrt_dsi = np.sqrt(delta_sq_init[i])
-            lhs_51b = delta_sq_init[i] + 2 * sqrt_dsi * (delta_var[i] - sqrt_dsi)
-            constraints.append(lhs_51b >= xi_var[i])
-
-        # ---- Solve ----
-        prob = cp.Problem(objective, constraints)
-        try:
-            prob.solve(
-                solver=cp.SCS,
-                verbose=False,
-                max_iters=30000,
-                eps=1e-7,
-                acceleration_lookback=20,
-                scale=1.0
-            )
-        except Exception as e:
-            print(f"SCS solver failed: {e}")
-
-        # ---- Handle solution ----
-        solved = (prob.status in ['optimal', 'optimal_inaccurate']
-                  and S_var.value is not None
-                  and not np.any(np.isnan(S_var.value))
-                  and not np.any(np.isinf(S_var.value)))
-
-        if not solved:
-            # Invalid solution: use last valid, adjust S_init
+        if not solved or S.value is None or np.any(np.isnan(S.value)):
             S_init = S_init_valid.copy()
             N_nan += 1
-            if u < n_iter - 1:
+            if u < nit - 1:
                 scale = 0.97 ** (N_nan ** N_nan)
                 S_init = S_init + scale * (S_valid - S_init)
-                V_init[:, 0] = (S_init[:, 0] - s_start) / T_f
-                V_init[:, 1:] = np.diff(S_init, axis=1) / T_f
-                V_init_norms = np.linalg.norm(V_init, axis=0)
-                delta_sq_init = (np.sqrt(1 + V_init_norms**4 / (4 * v_0**4))
-                                 - V_init_norms**2 / (2 * v_0**2))
-                delta_sq_init = np.maximum(delta_sq_init, 1e-10)
+                V_init[:, 0] = (S_init[:, 0] - s_start) / P.T_f
+                V_init[:, 1:] = np.diff(S_init, axis=1) / P.T_f
+                V_norms = np.linalg.norm(V_init, axis=0)
+                dsq = np.sqrt(1 + V_norms**4 / (4 * P.v_0**4)) - V_norms**2 / (2 * P.v_0**2)
+                dsq = np.maximum(dsq, 1e-10)
             else:
                 break
         else:
-            # Valid solution
+            # ---- Post-solve validation: reject if constraints clearly violated ----
+            Sv = np.array(S.value)
+            Vv = np.array(V.value)
+            Vv_norms = np.linalg.norm(Vv, axis=0)
+            if np.any(Vv_norms > P.V_max * 1.05) or np.any(Sv < -10) or np.any(Sv[0] > P.L_x + 10) or np.any(Sv[1] > P.L_y + 10):
+                # Treat as infeasible
+                S_init = S_init_valid.copy()
+                N_nan += 1
+                if u < nit - 1:
+                    scale = 0.97 ** (N_nan ** N_nan)
+                    S_init = S_init + scale * (S_valid - S_init)
+                    V_init[:, 0] = (S_init[:, 0] - s_start) / P.T_f
+                    V_init[:, 1:] = np.diff(S_init, axis=1) / P.T_f
+                    V_norms = np.linalg.norm(V_init, axis=0)
+                    dsq = np.sqrt(1 + V_norms**4 / (4 * P.v_0**4)) - V_norms**2 / (2 * P.v_0**2)
+                    dsq = np.maximum(dsq, 1e-10)
+                continue
+
             N_nan = 0
-            S_sol = S_var.value
-            V_sol = V_var.value
-            delta_sol = delta_var.value
-            xi_sol = xi_var.value
+            optval = float(prob.value)
+            Sv = np.array(S.value)
+            Vv = np.array(V.value)
 
-            opt_val = prob.value
-            # Evaluate Taylor values at solution
-            crb_val = 0.0
-            for j in range(K_stg):
-                hi = hover_idx[j]
-                crb_val += crb_gx[j] * (S_sol[0, hi] - S_init[0, hi])
-                crb_val += crb_gy[j] * (S_sol[1, hi] - S_init[1, hi])
-            rate_val = 0.0
-            for n in range(N_stg):
-                rate_val += rate_gx[n] * (S_sol[0, n] - S_init[0, n])
-                rate_val += rate_gy[n] * (S_sol[1, n] - S_init[1, n])
+            crb_v = float(crb_gx @ (Sv[0, hover_idx] - S_init[0, hover_idx])
+                          + crb_gy @ (Sv[1, hover_idx] - S_init[1, hover_idx]))
+            rate_v = float(rate_gx @ (Sv[0, :] - S_init[0, :])
+                           + rate_gy @ (Sv[1, :] - S_init[1, :]))
 
-            if abs(best_val) > abs(opt_val):
-                S_valid = S_sol.copy()
+            if abs(best_val) > abs(optval):
+                S_valid = Sv.copy()
                 S_init_valid = S_init.copy()
-                V_valid = V_sol.copy()
-                delta_valid = delta_sol.copy()
-                xi_valid = xi_sol.copy()
-                R_opt_valid = rate_val
-                CRB_opt_valid = crb_val
-                best_val = opt_val
+                V_valid = Vv.copy()
+                R_best = rate_v; CRB_best = crb_v; best_val = optval
 
-            J_history[u] = opt_val
-            CRB_history[u] = crb_val
-            R_history[u] = rate_val
+            J_hist[u] = optval; CRB_hist[u] = crb_v; R_hist[u] = rate_v
 
-            # Update S_init for next iteration (eq. 54-55 analog)
-            if u < n_iter - 1 and abs(opt_val) >= opt_threshold:
-                S_init = S_init + w_star * (S_sol - S_init)
-                V_init[:, 0] = (S_init[:, 0] - s_start) / T_f
-                V_init[:, 1:] = np.diff(S_init, axis=1) / T_f
-                V_init_norms = np.linalg.norm(V_init, axis=0)
-                delta_sq_init = (np.sqrt(1 + V_init_norms**4 / (4 * v_0**4))
-                                 - V_init_norms**2 / (2 * v_0**2))
-                delta_sq_init = np.maximum(delta_sq_init, 1e-10)
+            if u < nit - 1 and abs(optval) >= P.opt_threshold:
+                S_init = S_init + P.w_star * (Sv - S_init)
+                V_init[:, 0] = (S_init[:, 0] - s_start) / P.T_f
+                V_init[:, 1:] = np.diff(S_init, axis=1) / P.T_f
+                V_norms = np.linalg.norm(V_init, axis=0)
+                dsq = np.sqrt(1 + V_norms**4 / (4 * P.v_0**4)) - V_norms**2 / (2 * P.v_0**2)
+                dsq = np.maximum(dsq, 1e-10)
             else:
                 break
 
-    return (S_valid, V_valid, CRB_opt_valid, R_opt_valid,
-            J_history, CRB_history, R_history)
+    return S_valid, V_valid, CRB_best, R_best, J_hist, CRB_hist, R_hist
