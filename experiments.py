@@ -34,7 +34,7 @@ def monte_carlo(n_mc, setup_base, params_override=None, verbose=False):
     Rate_mc = np.zeros(n_mc)
     MSE_mc = np.zeros(n_mc)
 
-    n_cores = 1
+    n_cores = 10
     print(f"Using {n_cores} CPU cores...")
 
     args_list = [(mc, setup_base, params_override) for mc in range(n_mc)]
