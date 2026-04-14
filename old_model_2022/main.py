@@ -8,7 +8,7 @@ import parameters as PM
 from multi_stage import multi_stage
 from plotting import plot_map, plot_convergence
 
-FIGS = os.path.join(os.path.dirname(__file__), 'figures')
+FIGS = os.path.join(os.path.dirname(__file__), '../figures')
 os.makedirs(FIGS, exist_ok=True)
 
 if __name__ == '__main__':
