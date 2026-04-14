@@ -21,11 +21,11 @@ def fisher_mat_entry(S_hov, s_target, entry_type):
     dy = S_hov[1, :] - s_target[1]
 
     if entry_type == 'theta_a':
-        return factor_CRB * np.sum(dx**2 / ds**6) + 8 * np.sum(dx**2 / ds**4)
+        return factor_CRB * np.sum(dx ** 2 / ds ** 6)
     elif entry_type == 'theta_b':
-        return factor_CRB * np.sum(dy**2 / ds**6) + 8 * np.sum(dy**2 / ds**4)
+        return factor_CRB * np.sum(dy ** 2 / ds ** 6)
     elif entry_type == 'theta_c':
-        return factor_CRB * np.sum(dx * dy / ds**6) + 8 * np.sum(dx * dy / ds**4)
+        return factor_CRB * np.sum(dx * dy / ds ** 6)
 
 
 # ======================== CRB for ONE target (eq. 31, TWC) ========================

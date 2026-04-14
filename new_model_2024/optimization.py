@@ -107,18 +107,16 @@ def optimize_trajectory(E_m, comm_users, S_hover_all, S_total,
         delta = cp.Variable(N_m, nonneg=True)
         xi = cp.Variable(N_m, nonneg=True)
 
-        # CRB Taylor (want to minimize → descent direction)
-        CRB_taylor = (crb_gx @ (S[0, hover_idx] - S_init[0, hover_idx])
-                      + crb_gy @ (S[1, hover_idx] - S_init[1, hover_idx]))
+        delta_CRB = (crb_gx @ (S[0, hover_idx] - S_init[0, hover_idx])
+                + crb_gy @ (S[1, hover_idx] - S_init[1, hover_idx]))
 
-        # Rate Taylor (want to maximize → ascent direction)
-        R_taylor = (rate_gx @ (S[0, :] - S_init[0, :])
-                    + rate_gy @ (S[1, :] - S_init[1, :]))
+        delta_Rate = (rate_gx @ (S[0, :] - S_init[0, :])
+                 + rate_gy @ (S[1, :] - S_init[1, :]))
 
         # Normalized increment: minimize η·(CRB/Ψ^s_prev) - (1-η)·(R/Ψ^c_prev)
         obj = cp.Minimize(
-            eta * CRB_taylor / sens_norm
-            - (1 - eta) * R_taylor / comm_norm
+            eta * (-delta_CRB / sens_norm)
+                       + (1 - eta) * (delta_Rate / comm_norm)
         )
 
         cons = [E_m >= _build_energy_cvx(V, delta, N_m, K_m)]

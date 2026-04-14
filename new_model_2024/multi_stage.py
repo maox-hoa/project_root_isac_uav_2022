@@ -88,8 +88,8 @@ def multi_stage(setup=None, eta_val=None, n_iter_val=None, verbose=True):
 
     # Initial metrics (from coarse estimate)
     # Use a dummy trajectory to get initial Ψ^s, Ψ^c
-    # prev_sens = 1e6   # large initial CRB
-    # prev_comm = 1e-6   # small initial rate
+    prev_sens = None
+    prev_comm = None
     def get_initial_metrics(S_init_traj, hover_idx_init, targets_est_curr, comm_users_curr, B_alloc_curr):
         S_hov_init = S_init_traj[:, hover_idx_init]
         curr_sens = sens_metric(S_hov_init, targets_est_curr)

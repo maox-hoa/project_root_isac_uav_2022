@@ -6,7 +6,8 @@ Uses LSE smoothing for differentiability (eq. 37, TWC).
 import numpy as np
 from parameters import P, alpha_0, N_0, B, H, T_f, T_h, mu, M as M_users
 from models import user_quad_distance, get_hover_indices
-
+# compute using FULL trajectory
+from rate_functions import all_user_throughputs
 
 # ======================== Per-User Throughput ========================
 
