@@ -36,7 +36,7 @@ def _calc_nlst(E_remaining):
     # Round down to nearest multiple of mu (need at least mu for 1 HP)
     Nlst = (Nlst // P.mu) * P.mu
     Nlst = min(Nlst, P.N_stg)  # Never exceed N_stg
-
+    Nlst = Nlst + 3
     Klst = Nlst // P.mu
     return Nlst, Klst
 
