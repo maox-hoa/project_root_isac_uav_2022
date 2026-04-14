@@ -118,10 +118,15 @@ def rate_grad_multiuser(S_stage, comm_users, B_alloc, N_total, t=1.0):
         snr_const_m = (P * alpha_0) / sigma2_m
 
         common = -2 * snr_const_m / (d**2 * (d**2 + snr_const_m))
-        scale = B_alloc[m] / (N_total * np.log(2))
+        # --- SỬA ĐỔI Ở ĐÂY ---
+        # Sai: scale = B_alloc[m] / (N_total * np.log(2))
+        # Đúng: Tổng data không nên chia cho N_total.
+        # Nếu mục tiêu là Total Data, gradient là tổng gradient của từng điểm.
+        scale = B_alloc[m] / np.log(2)
+        # ---------------------
 
         # Weighted by softmin contribution
-        # Gradient of -1/t·log(Σexp(-t·ψ_m)) = Σ w_m · ∂ψ_m/∂x
+        # Lưu ý: Softmin weights tính trên Total Rate, nên gradient cũng nên được scale tương ứng
         grad_x += weights[m] * common * dx * scale
         grad_y += weights[m] * common * dy * scale
 

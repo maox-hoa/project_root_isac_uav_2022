@@ -88,8 +88,13 @@ def multi_stage(setup=None, eta_val=None, n_iter_val=None, verbose=True):
 
     # Initial metrics (from coarse estimate)
     # Use a dummy trajectory to get initial Ψ^s, Ψ^c
-    prev_sens = 1e6   # large initial CRB
-    prev_comm = 1e-6   # small initial rate
+    # prev_sens = 1e6   # large initial CRB
+    # prev_comm = 1e-6   # small initial rate
+    def get_initial_metrics(S_init_traj, hover_idx_init, targets_est_curr, comm_users_curr, B_alloc_curr):
+        S_hov_init = S_init_traj[:, hover_idx_init]
+        curr_sens = sens_metric(S_hov_init, targets_est_curr)
+        curr_comm = comm_metric(S_init_traj, comm_users_curr, B_alloc_curr)
+        return curr_sens, curr_comm
 
     def _run_one_stage(N_m, K_m, stage_label):
         nonlocal s_start, E_m, targets_est, B_alloc
@@ -103,6 +108,10 @@ def multi_stage(setup=None, eta_val=None, n_iter_val=None, verbose=True):
 
         S_init = init_trajectory(s_start, s_end, N_m)
         hover_idx = get_hover_indices(N_m)
+
+        # Nếu là Stage đầu tiên (m=0), cập nhật prev_sens và prev_comm dựa trên S_init
+        if "Stage 1" in stage_label:
+            prev_sens, prev_comm = get_initial_metrics(S_init, hover_idx, targets_est, comm_users, B_alloc)
 
         # Build full trajectory + hover arrays
         all_trajs = list(S_opt_stages) + [S_init]

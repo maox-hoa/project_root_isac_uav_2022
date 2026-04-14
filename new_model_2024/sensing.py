@@ -113,14 +113,24 @@ def estimate_single_target(S_hover_all, D_meas_k, method='random_gridsearch'):
         best_val = 1e12
         pos = np.array([L_x / 2, L_y / 2])
 
-        for _ in range(10):
-            x_grid = L_x * rng_x.rand(1000)
-            y_grid = L_y * rng_y.rand(1000)
+        # Giai đoạn 1: Tìm vùng thô với nhiều điểm hơn (ví dụ 5000)
+        for _ in range(5): # Lặp vài lần để tránh local min
+            x_grid = L_x * rng_x.rand(5000)
+            y_grid = L_y * rng_y.rand(5000)
             candidate, val = _grid_search_mle(D_meas_k, x_grid, y_grid,
                                                x_hov, y_hov)
             if val < best_val:
                 best_val = val
                 pos = candidate
+        # Giai đoạn 2: Fine search quanh điểm tốt nhất tìm được
+        # Tạo lưới mịn 100x100 quanh vùng best +/- 50m
+        search_range = 50.0
+        x_fine = np.linspace(max(0, pos[0] - search_range), min(L_x, pos[0] + search_range), 100)
+        y_fine = np.linspace(max(0, pos[1] - search_range), min(L_y, pos[1] + search_range), 100)
+        candidate, val = _grid_search_mle(D_meas_k, x_fine, y_fine, x_hov, y_hov)
+
+        if val < best_val:
+            pos = candidate
         return pos
     else:
         x_grid = np.linspace(0, L_x, 1000)
