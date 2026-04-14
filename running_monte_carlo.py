@@ -19,7 +19,7 @@ if __name__ == '__main__':
     # Tạo danh sách công việc: (setup_copy, mức_năng_lượng)
     tasks = [(s.copy(), E) for E in energy_vec for s in setups]
     print(f"🚀 Chạy {len(tasks)} mô phỏng (n_mc={n_mc}) trên {Pool()._processes} nhân...")
-
+##
     # Chạy song song
     with Pool() as pool:
         results = pool.map(run_task, tasks)
