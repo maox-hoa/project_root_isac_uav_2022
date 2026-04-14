@@ -34,19 +34,21 @@ This repository provides a **Python-based reimplementation** of the UAV-enabled 
 > **Jing, X., Liu, F., Masouros, C., & Zeng, Y. (2024).** *ISAC from the Sky: UAV Trajectory Design for Joint Communication and Target Localization.* IEEE Transactions on Wireless Communications.
 
 ### 🎯 System Model
-┌─────────────────────────────────────────┐
-│ 🚁 UAV (Dual-functional Platform) │
-│ • Communication Base Station (Downlink)│
-│ • Mono-static Radar (Target Sensing) │
-└─────────────────────────────────────────┘
-│
-┌──────────┴──────────┐
-▼ ▼
-┌───────────────┐ ┌─────────────────┐
-│ 📱 Ground CUs │ │ 🎯 Sensing Targets│
-│ (M users) │ │ (K targets) │
-│ • Data rate │ │ • CRB metric │
-└───────────────┘ └─────────────────┘
+```
+┌─────────────────────────────────────────────────┐
+│     UAV (Dual-functional Platform)              │
+├─────────────────────────────────────────────────┤
+│  • Communication Base Station (Downlink)        │
+│  • Mono-static Radar (Target Sensing)           │
+└─────────────────────────────────────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────┐
+│     Ground CUs        │     Sensing Targets     │
+│  (M users)            │  (K targets)            │
+│  • Data rate          │  • CRB metric           │
+└───────────────────────┴─────────────────────────┘
+```
 
 ### 🎯 Optimization Objective
 
