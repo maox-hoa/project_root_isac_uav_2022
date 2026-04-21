@@ -1,0 +1,10 @@
+MONTE CARLO SUMMARY
+======================================================================
+Runs: 50
+Energy budget: 40.0 kJ, eta: 0.5
+CU: 2, ST: 2
+
+Psi_c mean: 5.2385 Gbits (std: 0.5758)
+Psi_s mean: 1.8309e-01 m² (std: 1.4676e-01)
+MSE mean: 1.0089e+03 m² (std: 5.4541e+03)
+Energy mean: 39.5073 kJ (std: 0.6101)
