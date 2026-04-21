@@ -6,7 +6,7 @@
       <excludeFolder url="file://$MODULE_DIR$/old_model_2022" />
       <excludeFolder url="file://$MODULE_DIR$/new_model_2024" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 3.13 (project_root_isac_uav_2022) (3)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 3.14 (project_root_isac_uav_2022)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
   <component name="PyDocumentationSettings">

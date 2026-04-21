@@ -5,7 +5,7 @@ Các giá trị tham số lấy từ Bảng I (TABLE I) trong bài báo:
 Xiaoye Jing, Fan Liu, Christos Masouros, Yong Zeng
 IEEE Transactions on Wireless Communications, 2024
 """
-
+# Đây là file tham số của hệ thống. Tương tự với file parameters.m
 import numpy as np
 from dataclasses import dataclass, field
 

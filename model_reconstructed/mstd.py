@@ -142,6 +142,9 @@ def run_mstd(cus: np.ndarray,
                 print(f"\n[MSTD] Stage {j}: E={E_remaining/1e3:.1f}kJ, Nf={Nf}")
 
         # --- (a) Optimize trajectory P'_1(j) ---
+        # Theo Algorithm 2 (paper): line 2 reset B_m = B/M trước khi giải P'_1(j).
+        # Trajectory LUÔN tối ưu với B uniform; BA chỉ áp dụng post-hoc ở line 3.
+        B_uniform = np.full(M, cfg.B / M)
         opt_res = optimize_trajectory_stage(
             start_point=current_position,
             Nf=Nf, remaining_energy=E_remaining,
@@ -149,7 +152,7 @@ def run_mstd(cus: np.ndarray,
             prev_hover_points=all_hover_points,
             cus=cus, sts_estimate=sts_est,
             Psi_c_prev=Psi_c_prev, Psi_s_prev=Psi_s_prev,
-            bandwidths=B_alloc, eta=eta, cfg=cfg,
+            bandwidths=B_uniform, eta=eta, cfg=cfg,
             max_iter=max_iter_per_stage, verbose=verbose,
         )
         S_j = opt_res.waypoints
@@ -168,9 +171,11 @@ def run_mstd(cus: np.ndarray,
         all_waypoints = np.vstack([all_waypoints, S_j])
         all_hover_points = np.vstack([all_hover_points, HP_j])
 
-        # --- (d) Optimize bandwidth P'_2(j) ---
+        # --- (d) Optimize bandwidth P'_2(j) -- post-hoc, sau khi trajectory cố định ---
         if use_bandwidth_alloc:
             B_alloc = optimize_bandwidth(all_waypoints, all_hover_points, cus, cfg)
+        else:
+            B_alloc = B_uniform
 
         # --- (e) Cập nhật ước lượng ST qua MLE (dùng TOÀN BỘ measurements) ---
         for k in range(K):

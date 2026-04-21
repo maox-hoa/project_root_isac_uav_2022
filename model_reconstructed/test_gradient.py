@@ -37,7 +37,8 @@ grad_ana = analytical_gradient_f(
 )
 
 # --- Gradient finite diff ---
-h = 1.0
+# CRB cực nhạy với HP (phi tuyến bậc 6-8), dùng h nhỏ tránh truncation error
+h = 0.01
 grad_fd = np.zeros_like(S)
 for i in range(Nf):
     for axis in range(2):

@@ -50,38 +50,29 @@ def compute_Psi_c(all_waypoints: np.ndarray,
                   cus: np.ndarray,
                   bandwidths: np.ndarray,
                   cfg: SimulationConfig = DEFAULT,
-                  smooth: bool = False,
+                  smooth: bool = False,   # giữ API nhưng bỏ qua LSE
                   t: float = 1.0) -> float:
     """Ψ^c(j) - chỉ số comm: min qua các CU (eq. 9).
-    Nếu smooth=True dùng LSE với t TƯƠNG ĐỐI so với scale của psi_c.
+    Hard min — subgradient dùng để tính ∂/∂s.
     """
     psi_list = np.array([
         compute_psi_c_user(all_waypoints, all_hover_points,
                            cus[m], bandwidths[m], cfg)
         for m in range(len(cus))
     ])
-    if smooth and len(psi_list) > 1:
-        # Chuẩn hoá để LSE chạy ổn: t_eff = t / mean(psi)
-        scale = np.mean(np.abs(psi_list)) + 1e-12
-        t_eff = t / scale
-        return log_sum_exp_min(psi_list, t_eff)
     return float(np.min(psi_list))
 
 
 def compute_Psi_s(all_hover_points: np.ndarray,
                   sts: np.ndarray,
                   cfg: SimulationConfig = DEFAULT,
-                  smooth: bool = False,
+                  smooth: bool = False,   # giữ API nhưng bỏ qua LSE
                   t: float = 1.0) -> float:
     """Ψ^s(j) - chỉ số sensing: max CRB qua các ST (eq. 32).
-    smooth=True: dùng LSE với t TƯƠNG ĐỐI.
+    Hard max — subgradient dùng để tính ∂/∂HP.
     """
     psi_list = np.array([crb_sum(all_hover_points, sts[k], cfg)
                           for k in range(len(sts))])
-    if smooth and len(psi_list) > 1:
-        scale = np.mean(np.abs(psi_list)) + 1e-12
-        t_eff = t / scale
-        return log_sum_exp_max(psi_list, t_eff)
     return float(np.max(psi_list))
 
 
@@ -103,9 +94,8 @@ def objective_f(stage_waypoints: np.ndarray,
     Hàm mục tiêu f(S_j, B_j) theo P(j) eq. trong Section III.
 
     η * (Ψ^s(j-1) - Ψ^s(j)) / Ψ^s(j-1)  +  (1-η) * (Ψ^c(j) - Ψ^c(j-1)) / Ψ^c(j-1)
-    (đã normalize)
 
-    Dùng LSE smoothing với t = cfg.t_lse.
+    Dùng hard min/max (consistent với paper eq. 9 và eq. 32).
     """
     # Trích HP của stage hiện tại (index theo mu)
     stage_hover_points = _extract_hps(stage_waypoints, mu)
@@ -115,12 +105,11 @@ def objective_f(stage_waypoints: np.ndarray,
     all_hover_points = np.vstack([prev_hover_points, stage_hover_points]) \
         if len(prev_hover_points) > 0 else stage_hover_points
 
-    # Psi_s(j) dùng ST ước lượng
-    Psi_s = compute_Psi_s(all_hover_points, sts_estimate, cfg,
-                          smooth=True, t=cfg.t_lse)
+    # Psi_s(j) dùng ST ước lượng, hard max (eq. 32)
+    Psi_s = compute_Psi_s(all_hover_points, sts_estimate, cfg)
+    # Psi_c(j) hard min (eq. 9)
     Psi_c = compute_Psi_c(all_waypoints, all_hover_points,
-                          cus, stage_bandwidths, cfg,
-                          smooth=True, t=cfg.t_lse)
+                          cus, stage_bandwidths, cfg)
 
     comm_gain = (Psi_c - Psi_c_prev) / max(Psi_c_prev, 1e-9)
     sens_gain = (Psi_s_prev - Psi_s) / max(Psi_s_prev, 1e-9)
@@ -188,14 +177,16 @@ def _grad_crb_wrt_hp(hp_xy: np.ndarray,
     d2 = cfg.H**2 + dx**2 + dy**2
     d4 = d2**2; d6 = d2**3; d8 = d2**4
 
-    # ∂(dx²/d⁶)/∂xh = 2dx/d⁶ − 12 dx³/d⁸;   ∂(dx²/d⁴)/∂xh = 2dx/d⁴ − 8 dx³/d⁶
-    dTa_dxh = K0 * (2*dx/d6 - 12*dx**3/d8) + 8 * (2*dx/d4 - 8*dx**3/d6)
-    # ∂(dx²/d⁶)/∂yh = −12 dx² dy / d⁸; ∂(dx²/d⁴)/∂yh = −8 dx² dy / d⁶
-    dTa_dyh = K0 * (-12 * dx**2 * dy / d8) + 8 * (-8 * dx**2 * dy / d6)
-    dTb_dxh = K0 * (-12 * dy**2 * dx / d8) + 8 * (-8 * dy**2 * dx / d6)
-    dTb_dyh = K0 * (2*dy/d6 - 12*dy**3/d8) + 8 * (2*dy/d4 - 8*dy**3/d6)
-    dTc_dxh = K0 * (dy/d6 - 12*dx**2*dy/d8) + 8 * (dy/d4 - 8*dx**2*dy/d6)
-    dTc_dyh = K0 * (dx/d6 - 12*dx*dy**2/d8) + 8 * (dx/d4 - 8*dx*dy**2/d6)
+    # ∂(u²/r⁶)/∂xh = 2u/r⁶ − 6u³/r⁸   (vì ∂r⁶/∂xh = 6u·r⁴)
+    # ∂(u²/r⁴)/∂xh = 2u/r⁴ − 4u³/r⁶   (vì ∂r⁴/∂xh = 4u·r²)
+    dTa_dxh = K0 * (2*dx/d6 - 6*dx**3/d8) + 8 * (2*dx/d4 - 4*dx**3/d6)
+    # ∂(u²/r⁶)/∂yh = −6u²v/r⁸;  ∂(u²/r⁴)/∂yh = −4u²v/r⁶
+    dTa_dyh = K0 * (-6 * dx**2 * dy / d8) + 8 * (-4 * dx**2 * dy / d6)
+    dTb_dxh = K0 * (-6 * dy**2 * dx / d8) + 8 * (-4 * dy**2 * dx / d6)
+    dTb_dyh = K0 * (2*dy/d6 - 6*dy**3/d8) + 8 * (2*dy/d4 - 4*dy**3/d6)
+    # ∂(uv/r⁶)/∂xh = v/r⁶ − 6u²v/r⁸;  ∂(uv/r⁴)/∂xh = v/r⁴ − 4u²v/r⁶
+    dTc_dxh = K0 * (dy/d6 - 6*dx**2*dy/d8) + 8 * (dy/d4 - 4*dx**2*dy/d6)
+    dTc_dyh = K0 * (dx/d6 - 6*dx*dy**2/d8) + 8 * (dx/d4 - 4*dx*dy**2/d6)
 
     num = Theta_a + Theta_b
     dnum_dxh = dTa_dxh + dTb_dxh
@@ -242,7 +233,9 @@ def analytical_gradient_f(stage_waypoints: np.ndarray,
     M = len(cus)
     K = len(sts_estimate)
 
-    # --- Các trọng số softmin/softmax ---
+    # --- Subgradient weights (hard min / hard max) ---
+    # Với hard min/max, subgradient = gradient của phần tử đạt cực trị.
+    # Trường hợp tie thì phân đều.
     psi_c = np.array([
         compute_psi_c_user(all_waypoints, all_hover_points,
                            cus[m], stage_bandwidths[m], cfg)
@@ -251,21 +244,15 @@ def analytical_gradient_f(stage_waypoints: np.ndarray,
     psi_s = np.array([crb_sum(all_hover_points, sts_estimate[k], cfg)
                       for k in range(K)])
 
-    if M > 1:
-        scale_c = np.mean(np.abs(psi_c)) + 1e-12
-        t_c = cfg.t_lse / scale_c
-        shifted_c = -t_c * (psi_c - np.min(psi_c))
-        w_c = np.exp(shifted_c); w_c /= w_c.sum()
-    else:
-        w_c = np.ones(1)
+    # w_c[m] = 1 nếu m = argmin psi_c, chia đều nếu tie
+    min_c = np.min(psi_c)
+    tie_c = np.isclose(psi_c, min_c, rtol=1e-6)
+    w_c = tie_c.astype(float) / tie_c.sum()
 
-    if K > 1:
-        scale_s = np.mean(np.abs(psi_s)) + 1e-12
-        t_s = cfg.t_lse / scale_s
-        shifted_s = t_s * (psi_s - np.max(psi_s))
-        w_s = np.exp(shifted_s); w_s /= w_s.sum()
-    else:
-        w_s = np.ones(1)
+    # w_s[k] = 1 nếu k = argmax psi_s, chia đều nếu tie
+    max_s = np.max(psi_s)
+    tie_s = np.isclose(psi_s, max_s, rtol=1e-6)
+    w_s = tie_s.astype(float) / tie_s.sum()
 
     coef_c = (1 - eta) / max(Psi_c_prev, 1e-12)
     coef_s = eta / max(Psi_s_prev, 1e-12)
