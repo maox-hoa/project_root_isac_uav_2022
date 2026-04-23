@@ -174,6 +174,7 @@ def log_sum_exp_max(vals: np.ndarray, t: float = 1.0) -> float:
     vals = np.asarray(vals, dtype=float)
     c = np.max(vals)
     shifted = t * (vals - c)                      # <= 0
+    # print("log_sum_exp_max trong system_model đã được dùng.")
     return c + (1.0 / t) * np.log(np.sum(np.exp(shifted)))
 
 

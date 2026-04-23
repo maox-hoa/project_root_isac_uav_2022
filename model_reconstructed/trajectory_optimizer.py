@@ -50,30 +50,58 @@ def compute_Psi_c(all_waypoints: np.ndarray,
                   cus: np.ndarray,
                   bandwidths: np.ndarray,
                   cfg: SimulationConfig = DEFAULT,
-                  smooth: bool = False,   # giữ API nhưng bỏ qua LSE
-                  t: float = 1.0) -> float:
-    """Ψ^c(j) - chỉ số comm: min qua các CU (eq. 9).
-    Hard min — subgradient dùng để tính ∂/∂s.
+                  smooth: bool = True,
+                  t: float | None = None,
+                  scale: float | None = None) -> float:
+    """Ψ^c(j) - chỉ số comm (paper eq. 9 và 37).
+
+    Mặc định: Log-Sum-Exp smooth-min (đúng paper):
+        Ψ^c = -(1/t) log Σ_m exp(-t · ψ^c_m / scale)   × scale
+
+    `scale` cần thiết để LSE hoạt động thực sự — với ψ_c ~ 10⁸, t nhỏ như 1-10
+    sẽ bị underflow thành hard min nếu không normalize. scale mặc định =
+    max(|ψ|) nếu không cung cấp, cho phép user chọn t theo thang [1, 50] có ý nghĩa.
+
+    Gradient vẫn đúng vì scale là hằng số trong 1 lần gọi.
+
+    smooth=False → hard min (dùng để đánh giá cuối cùng).
     """
     psi_list = np.array([
         compute_psi_c_user(all_waypoints, all_hover_points,
                            cus[m], bandwidths[m], cfg)
         for m in range(len(cus))
     ])
-    return float(np.min(psi_list))
+    if not smooth or len(psi_list) == 1:
+        return float(np.min(psi_list))
+    if t is None:
+        t = cfg.t_lse
+    if scale is None:
+        scale = max(np.max(np.abs(psi_list)), 1e-12)
+    # LSE trên ψ đã normalize, rồi scale trả lại
+    return float(scale * log_sum_exp_min(psi_list / scale, t))
 
 
 def compute_Psi_s(all_hover_points: np.ndarray,
                   sts: np.ndarray,
                   cfg: SimulationConfig = DEFAULT,
-                  smooth: bool = False,   # giữ API nhưng bỏ qua LSE
-                  t: float = 1.0) -> float:
-    """Ψ^s(j) - chỉ số sensing: max CRB qua các ST (eq. 32).
-    Hard max — subgradient dùng để tính ∂/∂HP.
+                  smooth: bool = True,
+                  t: float | None = None,
+                  scale: float | None = None) -> float:
+    """Ψ^s(j) - chỉ số sensing (paper eq. 32 và 38).
+
+    Mặc định: Log-Sum-Exp smooth-max với normalize (xem compute_Psi_c).
+
+    smooth=False → hard max.
     """
     psi_list = np.array([crb_sum(all_hover_points, sts[k], cfg)
                           for k in range(len(sts))])
-    return float(np.max(psi_list))
+    if not smooth or len(psi_list) == 1:
+        return float(np.max(psi_list))
+    if t is None:
+        t = cfg.t_lse
+    if scale is None:
+        scale = max(np.max(np.abs(psi_list)), 1e-12)
+    return float(scale * log_sum_exp_max(psi_list / scale, t))
 
 
 # ---------------------------------------------------------------------------
@@ -91,13 +119,13 @@ def objective_f(stage_waypoints: np.ndarray,
                 mu: int,
                 cfg: SimulationConfig = DEFAULT) -> float:
     """
-    Hàm mục tiêu f(S_j, B_j) theo P(j) eq. trong Section III.
+    Hàm mục tiêu f(S_j, B_j) theo P(j) eq. 34 trong paper.
 
-    η * (Ψ^s(j-1) - Ψ^s(j)) / Ψ^s(j-1)  +  (1-η) * (Ψ^c(j) - Ψ^c(j-1)) / Ψ^c(j-1)
+    f = η · (Ψ^s(j-1) - Ψ^s(j)) / Ψ^s(j-1)
+      + (1-η) · (Ψ^c(j) - Ψ^c(j-1)) / Ψ^c(j-1)
 
-    Dùng hard min/max (consistent với paper eq. 9 và eq. 32).
+    Dùng LSE smoothing (paper eq. 37-38) với t = cfg.t_lse (user tự chọn).
     """
-    # Trích HP của stage hiện tại (index theo mu)
     stage_hover_points = _extract_hps(stage_waypoints, mu)
 
     all_waypoints = np.vstack([prev_waypoints, stage_waypoints]) \
@@ -105,11 +133,13 @@ def objective_f(stage_waypoints: np.ndarray,
     all_hover_points = np.vstack([prev_hover_points, stage_hover_points]) \
         if len(prev_hover_points) > 0 else stage_hover_points
 
-    # Psi_s(j) dùng ST ước lượng, hard max (eq. 32)
-    Psi_s = compute_Psi_s(all_hover_points, sts_estimate, cfg)
-    # Psi_c(j) hard min (eq. 9)
+    # LSE-smoothed Ψc và Ψs theo paper eq. 37, 38.
+    # Scale = Ψ_prev (constant trong iteration) → gradient analytical đúng.
+    Psi_s = compute_Psi_s(all_hover_points, sts_estimate, cfg,
+                          smooth=True, scale=Psi_s_prev)
     Psi_c = compute_Psi_c(all_waypoints, all_hover_points,
-                          cus, stage_bandwidths, cfg)
+                          cus, stage_bandwidths, cfg,
+                          smooth=True, scale=Psi_c_prev)
 
     comm_gain = (Psi_c - Psi_c_prev) / max(Psi_c_prev, 1e-9)
     sens_gain = (Psi_s_prev - Psi_s) / max(Psi_s_prev, 1e-9)
@@ -233,9 +263,13 @@ def analytical_gradient_f(stage_waypoints: np.ndarray,
     M = len(cus)
     K = len(sts_estimate)
 
-    # --- Subgradient weights (hard min / hard max) ---
-    # Với hard min/max, subgradient = gradient của phần tử đạt cực trị.
-    # Trường hợp tie thì phân đều.
+    # --- LSE softmax/softmin weights (paper eq. 37, 38) ---
+    # Normalize ψ bằng Psi_prev (constant trong iteration) trước khi tính weights.
+    # Điều này đảm bảo:
+    #   (a) t có ý nghĩa thống nhất không phụ thuộc scale của ψ
+    #   (b) gradient analytical đúng (scale là constant)
+    # ∂Ψ^c/∂ψ^c_m = exp(-t·ψ^c_m/scale) / Σ exp(-t·ψ^c_m'/scale) = softmin weight
+    # ∂Ψ^s/∂ψ^s_k = exp(t·ψ^s_k/scale) / Σ exp(t·ψ^s_k'/scale)   = softmax weight
     psi_c = np.array([
         compute_psi_c_user(all_waypoints, all_hover_points,
                            cus[m], stage_bandwidths[m], cfg)
@@ -244,15 +278,26 @@ def analytical_gradient_f(stage_waypoints: np.ndarray,
     psi_s = np.array([crb_sum(all_hover_points, sts_estimate[k], cfg)
                       for k in range(K)])
 
-    # w_c[m] = 1 nếu m = argmin psi_c, chia đều nếu tie
-    min_c = np.min(psi_c)
-    tie_c = np.isclose(psi_c, min_c, rtol=1e-6)
-    w_c = tie_c.astype(float) / tie_c.sum()
+    t = cfg.t_lse
+    scale_c = max(abs(Psi_c_prev), 1e-12)
+    scale_s = max(abs(Psi_s_prev), 1e-12)
 
-    # w_s[k] = 1 nếu k = argmax psi_s, chia đều nếu tie
-    max_s = np.max(psi_s)
-    tie_s = np.isclose(psi_s, max_s, rtol=1e-6)
-    w_s = tie_s.astype(float) / tie_s.sum()
+    if M > 1:
+        # softmin với normalize scale
+        psi_c_norm = psi_c / scale_c
+        c = np.min(psi_c_norm)
+        shifted = -t * (psi_c_norm - c)
+        w_c = np.exp(shifted); w_c /= w_c.sum()
+    else:
+        w_c = np.ones(1)
+
+    if K > 1:
+        psi_s_norm = psi_s / scale_s
+        c = np.max(psi_s_norm)
+        shifted = t * (psi_s_norm - c)
+        w_s = np.exp(shifted); w_s /= w_s.sum()
+    else:
+        w_s = np.ones(1)
 
     coef_c = (1 - eta) / max(Psi_c_prev, 1e-12)
     coef_s = eta / max(Psi_s_prev, 1e-12)

@@ -32,19 +32,22 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="ISAC-UAV: chạy 1 lần, hiển thị quỹ đạo + rate + CRB qua các stage."
     )
-    parser.add_argument("--Etot",    type=float, default=40e3,
+    parser.add_argument("--Etot",    type=float, default=60e3,
                         help="Tổng năng lượng UAV (J), mặc định 40000 = 40 kJ")
     parser.add_argument("--eta",     type=float, default=0.5,
                         help="Trọng số sensing/comm [0,1], mặc định 0.5")
-    parser.add_argument("--seed",    type=int,   default=42,
+    parser.add_argument("--t_lse",   type=float, default=15.0,
+                        help="Hệ số LSE smoothing (paper eq. 37-38), mặc định 5.0. "
+                             "t=5 cân bằng; t=10 gần hard min/max; t=1 smooth quá mạnh.")
+    parser.add_argument("--seed",    type=int,   default=None,
                         help="Random seed, mặc định 42")
     parser.add_argument("--max_stages",    type=int, default=8,
                         help="Số stage tối đa, mặc định 8")
-    parser.add_argument("--max_iter",      type=int, default=10,
-                        help="Số iteration tối ưu mỗi stage, mặc định 10")
-    parser.add_argument("--ba",   action="store_true",
+    parser.add_argument("--max_iter",      type=int, default=30,
+                        help="Số iteration tối ưu mỗi stage, mặc định 25")
+    parser.add_argument("--ba",   action="store_true", default=True,
                         help="Bật bandwidth allocation (mặc định: tắt)")
-    parser.add_argument("--no_plot", action="store_true",
+    parser.add_argument("--no_plot", action="store_true", default=True,
                         help="Không lưu plot")
     parser.add_argument("--out_dir", type=str, default="output_main",
                         help="Thư mục lưu kết quả, mặc định 'output_main'")
@@ -225,7 +228,9 @@ def plot_results(result, cus, sts_true, args, cfg, out_dir: Path):
 # ─────────────────────────────────────────────────────────
 def main():
     args = parse_args()
-    cfg  = DEFAULT
+    # Tạo cfg tùy chỉnh để truyền t_lse theo user lựa chọn
+    cfg = SimulationConfig()
+    cfg.t_lse = args.t_lse
     out_dir = Path(args.out_dir)
     out_dir.mkdir(exist_ok=True)
 
@@ -234,6 +239,7 @@ def main():
     print(f"  Etot    = {args.Etot/1e3:.1f} kJ")
     print(f"  η       = {args.eta}  "
           f"({'sensing-priority' if args.eta > 0.5 else 'comm-priority' if args.eta < 0.5 else 'balanced'})")
+    print(f"  t_lse   = {args.t_lse}  (LSE smoothing)")
     print(f"  BA      = {'ON' if args.ba else 'OFF'}")
     print(f"  Seed    = {args.seed}")
     print(f"  Scenario= {args.scenario}")

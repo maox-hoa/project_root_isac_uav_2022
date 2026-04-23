@@ -173,8 +173,11 @@ def run_mstd(cus: np.ndarray,
 
         # --- (d) Optimize bandwidth P'_2(j) -- post-hoc, sau khi trajectory cố định ---
         if use_bandwidth_alloc:
+            print("Thực hiện tối ưu băng thông. Hàm optimize_bandwidth")
             B_alloc = optimize_bandwidth(all_waypoints, all_hover_points, cus, cfg)
+            print(f"B_alloc: {B_alloc}")
         else:
+            print("Không thực hiện tối ưu băng thông")
             B_alloc = B_uniform
 
         # --- (e) Cập nhật ước lượng ST qua MLE (dùng TOÀN BỘ measurements) ---
@@ -198,6 +201,9 @@ def run_mstd(cus: np.ndarray,
         result.crb_history.append(crb.squeeze())
 
         Psi_c_j = compute_Psi_c_opt(all_waypoints, all_hover_points, cus, B_alloc, cfg)
+        Psi_c_non_ba = compute_Psi_c_opt(all_waypoints, all_hover_points, cus, B_uniform, cfg)
+        print(f"Psi_c_j: {Psi_c_j} and Psi_c_non_ba: {Psi_c_non_ba}")
+        print(f"Rate gain after BA is: {Psi_c_j - Psi_c_non_ba}")
         Psi_s_j = compute_Psi_s_opt(all_hover_points, sts_est, cfg)
         result.total_transmitted_data.append(Psi_c_j)
         result.psi_s_history.append(Psi_s_j)

@@ -52,18 +52,21 @@ def parse_args():
     )
     parser.add_argument(
         "--Etot", type=float, nargs="+",
-        default=[20e3, 40e3, 60e3],
+        default=[20e3, 30e3, 40e3, 50e3, 60e3],
         help="Danh sách mức năng lượng (J). Ví dụ: --Etot 20000 40000 60000"
     )
-    parser.add_argument("--n_trials", type=int, default=5,
+    parser.add_argument("--n_trials", type=int, default=50,
                         help="Số lần lặp Monte Carlo mỗi Etot, mặc định 5")
     parser.add_argument("--eta",      type=float, default=0.5,
                         help="Trọng số sensing/comm [0,1], mặc định 0.5")
-    parser.add_argument("--ba",       action="store_true",
+    parser.add_argument("--t_lse",    type=float, default=15,
+                        help="Hệ số LSE smoothing (paper eq. 37-38), mặc định 5.0. "
+                             "t=5 cân bằng; t=10 gần hard min/max.")
+    parser.add_argument("--ba",       action="store_true", default=True,
                         help="Bật bandwidth allocation")
     parser.add_argument("--max_stages", type=int, default=8,
                         help="Số stage tối đa, mặc định 8")
-    parser.add_argument("--max_iter",   type=int, default=10,
+    parser.add_argument("--max_iter",   type=int, default=15,
                         help="Số iteration tối ưu mỗi stage, mặc định 10")
     parser.add_argument("--seed",     type=int, default=0,
                         help="Base seed (seed mỗi trial = base_seed + trial_idx)")
@@ -308,7 +311,8 @@ def plot_mc_results(mc_results, args, out_dir: Path):
 # ─────────────────────────────────────────────────────────
 def main():
     args = parse_args()
-    cfg  = DEFAULT
+    cfg = SimulationConfig()
+    cfg.t_lse = args.t_lse
     out_dir = Path(args.out_dir)
     out_dir.mkdir(exist_ok=True)
 
@@ -319,6 +323,7 @@ def main():
     print(f"  Etot levels : {[f'{E/1e3:.0f} kJ' for E in Etot_list]}")
     print(f"  n_trials    : {args.n_trials}")
     print(f"  η           : {args.eta}")
+    print(f"  t_lse       : {args.t_lse}")
     print(f"  BA          : {'ON' if args.ba else 'OFF'}")
     print(f"  Baselines   : {'ON' if args.baselines else 'OFF'}")
     print(f"  Scenario    : {args.scenario}")

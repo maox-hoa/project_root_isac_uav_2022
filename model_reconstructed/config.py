@@ -47,7 +47,15 @@ class SimulationConfig:
 
     # ===== Các tham số MSTD =====
     Nstg: int = 60          # Số time slot trong mỗi stage
-    t_lse: float = 1.0      # Hệ số scaling cho log-sum-exp (eq. 37-38)
+    t_lse: float = 15      # Hệ số LSE smoothing (paper eq. 37-38).
+    # ψ được normalize bằng Ψ_prev trước khi LSE → t độc lập với scale của ψ.
+    # Hành vi theo t:
+    #   t=1:   bias ~70% so với hard min/max, SMOOTH rất mạnh (có thể lệch kết quả)
+    #   t=5:   bias ~10% — cân bằng (khuyến nghị mặc định)
+    #   t=10:  bias ~3% — gần hard min/max
+    #   t=50:  bias <0.1% — ≈ subgradient
+    # Khuyến nghị: t∈[5,15]. Tăng t nếu muốn close to paper exact;
+    # giảm t nếu muốn smoothness mạnh hơn cho optimization landscape.
 
     # ===== Vị trí trạm sạc =====
     base_station: np.ndarray = field(
