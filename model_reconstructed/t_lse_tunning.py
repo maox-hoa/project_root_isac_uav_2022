@@ -29,7 +29,7 @@ def parse_args():
     p.add_argument("--eta",  type=float, default=0.5)
     p.add_argument("--t_list", type=float, nargs="+",
                    default=[1, 1.5, 2, 2.5, 3, 3.5, 5, 5.5, 7, 10, 15, 20, 30, 50])
-    p.add_argument("--n_trials", type=int, default=10)
+    p.add_argument("--n_trials", type=int, default=100)
     p.add_argument("--max_stages", type=int, default=8)
     p.add_argument("--max_iter",   type=int, default=20)
     p.add_argument("--seed", type=int, default=0)
@@ -102,7 +102,7 @@ def main():
     results = {t: [] for t in args.t_list}
     done    = 0
     t_start = time.time()
-    n_workers = 5
+    n_workers = 20
     with ProcessPoolExecutor(max_workers=n_workers,
                              initializer=_worker_init) as ex:
         futures = {ex.submit(run_one, job): job for job in jobs}
