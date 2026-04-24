@@ -25,7 +25,7 @@ warnings.filterwarnings("ignore")
 
 def parse_args():
     p = argparse.ArgumentParser(description="Tìm t_lse tối ưu cho Ψc (parallel).")
-    p.add_argument("--Etot", type=float, default=40e3)
+    p.add_argument("--Etot", type=float, default=20e3)
     p.add_argument("--eta",  type=float, default=0.5)
     p.add_argument("--t_list", type=float, nargs="+",
                    default=[1, 1.5, 2, 2.5, 3, 3.5, 5, 5.5, 7, 10, 15, 20, 30, 50])
