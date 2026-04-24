@@ -173,11 +173,8 @@ def run_mstd(cus: np.ndarray,
 
         # --- (d) Optimize bandwidth P'_2(j) -- post-hoc, sau khi trajectory cố định ---
         if use_bandwidth_alloc:
-            print("Thực hiện tối ưu băng thông. Hàm optimize_bandwidth")
             B_alloc = optimize_bandwidth(all_waypoints, all_hover_points, cus, cfg)
-            print(f"B_alloc: {B_alloc}")
         else:
-            print("Không thực hiện tối ưu băng thông")
             B_alloc = B_uniform
 
         # --- (e) Cập nhật ước lượng ST qua MLE (dùng TOÀN BỘ measurements) ---
@@ -200,13 +197,17 @@ def run_mstd(cus: np.ndarray,
                         for k in range(K)])
         result.crb_history.append(crb.squeeze())
 
-        Psi_c_j = compute_Psi_c_opt(all_waypoints, all_hover_points, cus, B_alloc, cfg)
-        Psi_c_non_ba = compute_Psi_c_opt(all_waypoints, all_hover_points, cus, B_uniform, cfg)
-        print(f"Psi_c_j: {Psi_c_j} and Psi_c_non_ba: {Psi_c_non_ba}")
-        print(f"Rate gain after BA is: {Psi_c_j - Psi_c_non_ba}")
-        Psi_s_j = compute_Psi_s_opt(all_hover_points, sts_est, cfg)
+        # Giá trị để REPORT (hard min/max — rate và CRB thực sự):
+        Psi_c_j = compute_Psi_c_opt(all_waypoints, all_hover_points,
+                                     cus, B_alloc, cfg, smooth=False)
+        Psi_s_j = compute_Psi_s_opt(all_hover_points, sts_est, cfg, smooth=False)
         result.total_transmitted_data.append(Psi_c_j)
         result.psi_s_history.append(Psi_s_j)
+
+        # Giá trị LSE để reference cho stage sau (consistent với optimization):
+        Psi_c_j_lse = compute_Psi_c_opt(all_waypoints, all_hover_points,
+                                         cus, B_alloc, cfg, smooth=True)
+        Psi_s_j_lse = compute_Psi_s_opt(all_hover_points, sts_est, cfg, smooth=True)
 
         # --- (g) Cập nhật năng lượng còn lại + vị trí hiện tại ---
         Nh_stage = HP_j.shape[0]
@@ -215,9 +216,10 @@ def run_mstd(cus: np.ndarray,
         result.total_energy_consumed += E_stage_used
         current_position = S_j[-1].copy()
 
-        # Cập nhật Psi_prev cho stage kế (chính là Psi hiện tại)
-        Psi_c_prev = Psi_c_j
-        Psi_s_prev = Psi_s_j
+        # Cập nhật Psi_prev cho stage kế — dùng giá trị LSE để consistent với
+        # optimization objective (cùng reference scale).
+        Psi_c_prev = Psi_c_j_lse
+        Psi_s_prev = Psi_s_j_lse
 
         # Ending check
         if Nf < cfg.Nstg:

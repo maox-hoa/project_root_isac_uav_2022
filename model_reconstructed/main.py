@@ -32,11 +32,11 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="ISAC-UAV: chạy 1 lần, hiển thị quỹ đạo + rate + CRB qua các stage."
     )
-    parser.add_argument("--Etot",    type=float, default=60e3,
+    parser.add_argument("--Etot",    type=float, default=40e3,
                         help="Tổng năng lượng UAV (J), mặc định 40000 = 40 kJ")
     parser.add_argument("--eta",     type=float, default=0.5,
                         help="Trọng số sensing/comm [0,1], mặc định 0.5")
-    parser.add_argument("--t_lse",   type=float, default=15.0,
+    parser.add_argument("--t_lse",   type=float, default=1.0,
                         help="Hệ số LSE smoothing (paper eq. 37-38), mặc định 5.0. "
                              "t=5 cân bằng; t=10 gần hard min/max; t=1 smooth quá mạnh.")
     parser.add_argument("--seed",    type=int,   default=None,
